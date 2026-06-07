@@ -3,7 +3,7 @@
 // FILE MANAGER PRO - CORE PHP FUNCTIONS
 // ============================================
 
-$password = "sumalala168"; // Change this password
+$password = "sumala168"; // Change this password
 session_start();
 error_reporting(0);
 set_time_limit(0);
